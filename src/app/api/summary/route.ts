@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireAuth } from '@/lib/auth';
 
 // 월별 요약 및 통계 조회 (선택적 구성원 필터 지원)
 export async function GET(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const { searchParams } = new URL(request.url);

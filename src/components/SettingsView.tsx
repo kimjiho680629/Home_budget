@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Pencil, Trash2, Check, X, Plus, Users, Tag } from 'lucide-react';
+import { Pencil, Trash2, Check, X, Plus, Users, Tag, Lock, LogOut } from 'lucide-react';
 import type { Category, TransactionType, User } from '@/types/budget';
 import { CATEGORY_ICON_OPTIONS, COLOR_PALETTE } from '@/lib/constants';
 import { CategoryIcon } from './CategoryIcon';
@@ -9,12 +9,27 @@ import { CategoryIcon } from './CategoryIcon';
 interface SettingsViewProps {
   users: User[];
   categories: Category[];
+  envManagedAuth?: boolean;
   onRefresh: () => Promise<void>;
+  onLogout: () => Promise<void>;
 }
 
 // 가족 구성원 및 카테고리 직접 관리 화면 (PC 2컬럼 / 모바일 1컬럼·서브탭)
-export function SettingsView({ users, categories, onRefresh }: SettingsViewProps) {
-  const [mobileSection, setMobileSection] = useState<'family' | 'category'>('family');
+export function SettingsView({
+  users,
+  categories,
+  envManagedAuth = false,
+  onRefresh,
+  onLogout,
+}: SettingsViewProps) {
+  const [mobileSection, setMobileSection] = useState<'family' | 'category' | 'security'>('family');
+
+  // --- 비밀번호 변경 상태 ---
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordMsg, setPasswordMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   // --- 가족 구성원 추가 상태 ---
   const [newUserName, setNewUserName] = useState('');
@@ -210,31 +225,81 @@ export function SettingsView({ users, categories, onRefresh }: SettingsViewProps
 
   const visibleCategories = categories.filter((c) => c.type === catTab);
 
+  // 비밀번호 변경
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg(null);
+    if (!currentPassword || !newPassword) {
+      setPasswordMsg({ type: 'err', text: '현재 비밀번호와 새 비밀번호를 입력하세요.' });
+      return;
+    }
+    if (newPassword.length < 4) {
+      setPasswordMsg({ type: 'err', text: '새 비밀번호는 최소 4자 이상이어야 합니다.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordMsg({ type: 'err', text: '새 비밀번호 확인이 일치하지 않습니다.' });
+      return;
+    }
+    try {
+      setChangingPassword(true);
+      const res = await fetch('/api/auth', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setPasswordMsg({ type: 'ok', text: data.message || '비밀번호가 변경되었습니다.' });
+      } else {
+        setPasswordMsg({ type: 'err', text: data.error || '비밀번호 변경에 실패했습니다.' });
+      }
+    } catch {
+      setPasswordMsg({ type: 'err', text: '비밀번호 변경 중 오류가 발생했습니다.' });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* 모바일 전용 서브 탭 전환 */}
-      <div className="lg:hidden grid grid-cols-2 gap-2 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-2xl">
+      <div className="lg:hidden grid grid-cols-3 gap-1.5 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-2xl">
         <button
           type="button"
           onClick={() => setMobileSection('family')}
-          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
             mobileSection === 'family'
               ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
               : 'text-slate-600 dark:text-slate-400'
           }`}
         >
-          <Users size={15} /> 가족 구성원 설정
+          <Users size={14} /> 구성원
         </button>
         <button
           type="button"
           onClick={() => setMobileSection('category')}
-          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
             mobileSection === 'category'
               ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
               : 'text-slate-600 dark:text-slate-400'
           }`}
         >
-          <Tag size={15} /> 카테고리 관리
+          <Tag size={14} /> 카테고리
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileSection('security')}
+          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+            mobileSection === 'security'
+              ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        >
+          <Lock size={14} /> 비밀번호
         </button>
       </div>
 
@@ -644,6 +709,102 @@ export function SettingsView({ users, categories, onRefresh }: SettingsViewProps
           </form>
         </section>
       </div>
+
+      {/* 3. 보안 · 로그인 비밀번호 관리 패널 */}
+      <section
+        className={`bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 ${
+          mobileSection === 'security' ? 'block' : 'hidden lg:block'
+        }`}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Lock size={18} className="text-emerald-500" />
+              로그인 비밀번호 · 잠금 설정
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              외부 접속 보안을 위해 로그인 비밀번호를 변경하거나 현재 브라우저를 잠글 수 있습니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer shrink-0"
+          >
+            <LogOut size={15} />
+            <span>로그아웃 (잠금)</span>
+          </button>
+        </div>
+
+        {envManagedAuth ? (
+          <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300">
+            현재 <code className="font-mono font-bold">.env.local</code>의{' '}
+            <code className="font-mono font-bold">APP_PASSWORD</code> 환경 변수로 비밀번호가 관리되고 있습니다.
+            비밀번호를 바꾸려면 <code className="font-mono">.env.local</code>을 수정한 뒤 서버를 재시작하세요.
+          </div>
+        ) : (
+          <form onSubmit={handleChangePassword} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                현재 비밀번호
+              </label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="현재 비밀번호"
+                autoComplete="current-password"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                새 비밀번호 (4자 이상)
+              </label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="새 비밀번호"
+                autoComplete="new-password"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                새 비밀번호 확인
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="새 비밀번호 확인"
+                autoComplete="new-password"
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={changingPassword}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2 rounded-xl text-sm transition disabled:opacity-50 cursor-pointer h-[38px]"
+            >
+              {changingPassword ? '변경 중...' : '비밀번호 변경'}
+            </button>
+          </form>
+        )}
+
+        {passwordMsg && (
+          <div
+            className={`text-xs font-semibold px-3.5 py-2.5 rounded-xl border ${
+              passwordMsg.type === 'ok'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60'
+                : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/60'
+            }`}
+          >
+            {passwordMsg.text}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

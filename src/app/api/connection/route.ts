@@ -4,6 +4,7 @@ import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
 import QRCode from 'qrcode';
+import { requireAuth } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +35,9 @@ function isCloudflaredRunning(): boolean {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const port = process.env.PORT || '3000';
     const localUrls = getLocalUrls(port);

@@ -11,10 +11,12 @@ import {
   SlidersHorizontal,
   Plus,
   QrCode,
+  LogOut,
 } from 'lucide-react';
 import type { Category, SummaryData, TabType, Transaction, User } from '@/types/budget';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ConnectModal } from '@/components/ConnectModal';
+import { LoginScreen } from '@/components/LoginScreen';
 import { DashboardView } from '@/components/DashboardView';
 import { TransactionsView } from '@/components/TransactionsView';
 import { TransactionForm } from '@/components/TransactionForm';
@@ -22,6 +24,11 @@ import { StatsView } from '@/components/StatsView';
 import { SettingsView } from '@/components/SettingsView';
 
 export default function BudgetApp() {
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [envManagedAuth, setEnvManagedAuth] = useState(false);
+
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [tab, setTab] = useState<TabType>('dashboard');
   const [previousTab, setPreviousTab] = useState<TabType>('dashboard');
@@ -46,16 +53,47 @@ export default function BudgetApp() {
 
   const monthStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
 
+  const checkAuth = useCallback(async () => {
+    try {
+      setAuthChecking(true);
+      const res = await fetch('/api/auth');
+      const data = await res.json();
+      if (data.success && data.data) {
+        setAuthenticated(Boolean(data.data.authenticated));
+        setNeedsSetup(Boolean(data.data.needsSetup));
+        setEnvManagedAuth(Boolean(data.data.envManaged));
+      } else {
+        setAuthenticated(false);
+      }
+    } catch {
+      setAuthenticated(false);
+    } finally {
+      setAuthChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
   const fetchData = useCallback(async () => {
+    if (!authenticated) return;
     try {
       setLoading(true);
       const userQuery = encodeURIComponent(selectedUser);
-      const [sumRes, txRes, userRes, catRes] = await Promise.all([
-        fetch(`/api/summary?month=${monthStr}&user=${userQuery}`).then((r) => r.json()),
-        fetch(`/api/transactions?month=${monthStr}&user=${userQuery}`).then((r) => r.json()),
-        fetch('/api/users').then((r) => r.json()),
-        fetch('/api/categories').then((r) => r.json()),
+      const responses = await Promise.all([
+        fetch(`/api/summary?month=${monthStr}&user=${userQuery}`),
+        fetch(`/api/transactions?month=${monthStr}&user=${userQuery}`),
+        fetch('/api/users'),
+        fetch('/api/categories'),
       ]);
+
+      if (responses.some((r) => r.status === 401)) {
+        setAuthenticated(false);
+        return;
+      }
+
+      const [sumRes, txRes, userRes, catRes] = await Promise.all(responses.map((r) => r.json()));
 
       if (sumRes.success) setSummary(sumRes.data);
       if (txRes.success) setTransactions(txRes.data);
@@ -75,11 +113,25 @@ export default function BudgetApp() {
     } finally {
       setLoading(false);
     }
-  }, [monthStr, selectedUser]);
+  }, [authenticated, monthStr, selectedUser]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (authenticated) {
+      fetchData();
+    }
+  }, [authenticated, fetchData]);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth', { method: 'DELETE' });
+    } catch {
+      // 무시
+    } finally {
+      setConnectOpen(false);
+      setAuthenticated(false);
+      await checkAuth();
+    }
+  };
 
   const changeMonth = (offset: number) => {
     setCurrentDate((prev) => {
@@ -130,6 +182,26 @@ export default function BudgetApp() {
     stats: '통계 분석',
     settings: '가족 · 카테고리 설정',
   };
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-950 text-sm text-slate-400">
+        보안 상태를 확인하는 중...
+      </div>
+    );
+  }
+
+  if (!authenticated) {
+    return (
+      <LoginScreen
+        needsSetup={needsSetup}
+        onSuccess={() => {
+          setNeedsSetup(false);
+          setAuthenticated(true);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -190,6 +262,14 @@ export default function BudgetApp() {
             <span>기기 연결 · QR 코드</span>
           </button>
           <ThemeToggle />
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-sm font-bold transition cursor-pointer"
+          >
+            <LogOut size={17} />
+            <span>로그아웃 (잠금)</span>
+          </button>
           <div className="text-[11px] text-center text-slate-400 dark:text-slate-600 pt-1">
             PC · 모바일 반응형 지원
           </div>
@@ -363,7 +443,13 @@ export default function BudgetApp() {
                 )}
 
                 {tab === 'settings' && (
-                  <SettingsView users={users} categories={categories} onRefresh={fetchData} />
+                  <SettingsView
+                    users={users}
+                    categories={categories}
+                    envManagedAuth={envManagedAuth}
+                    onRefresh={fetchData}
+                    onLogout={handleLogout}
+                  />
                 )}
               </>
             )}

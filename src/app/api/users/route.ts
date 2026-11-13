@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireAuth } from '@/lib/auth';
 
 // 가족 구성원 목록 조회 (각 구성원의 총 거래 건수 포함)
-export async function GET() {
+export async function GET(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const users = db
@@ -24,6 +27,8 @@ export async function GET() {
 
 // 새 가족 구성원 추가
 export async function POST(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const body = await request.json();
@@ -51,6 +56,8 @@ export async function POST(request: Request) {
 
 // 가족 구성원 이름/색상 수정 (이름 변경 시 기존 거래 내역의 작성자도 함께 갱신)
 export async function PUT(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const body = await request.json();
@@ -95,6 +102,8 @@ export async function PUT(request: Request) {
 
 // 가족 구성원 삭제
 export async function DELETE(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const { searchParams } = new URL(request.url);

@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
+import { requireAuth } from '@/lib/auth';
 
 // 거래 내역 목록 조회 (월, 구성원 필터 지원)
 export async function GET(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const { searchParams } = new URL(request.url);
@@ -40,6 +43,8 @@ function normalizeAudAmount(raw: unknown): number {
 
 // 새 거래 내역 등록
 export async function POST(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const body = await request.json();
@@ -64,6 +69,8 @@ export async function POST(request: Request) {
 
 // 기존 거래 내역 수정
 export async function PUT(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const body = await request.json();
@@ -96,6 +103,8 @@ export async function PUT(request: Request) {
 
 // 거래 내역 삭제
 export async function DELETE(request: Request) {
+  const unauth = requireAuth(request);
+  if (unauth) return unauth;
   try {
     const db = getDb();
     const { searchParams } = new URL(request.url);
