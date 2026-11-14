@@ -11,18 +11,43 @@ const DB_PATH = path.join(DATA_DIR, 'budget.db');
 
 // Singleton database instance
 let dbInstance: DatabaseSync | null = null;
+let shutdownHookRegistered = false;
+
+function registerGracefulShutdown() {
+  if (shutdownHookRegistered) return;
+  shutdownHookRegistered = true;
+
+  const checkpointAndClose = () => {
+    if (!dbInstance) return;
+    try {
+      dbInstance.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      dbInstance.close();
+    } catch {
+      // 종료 시 이미 닫혔거나 잠금 상태면 무시
+    } finally {
+      dbInstance = null;
+    }
+  };
+
+  process.once('SIGTERM', checkpointAndClose);
+  process.once('SIGINT', checkpointAndClose);
+}
 
 export function getDb(): DatabaseSync {
   if (!dbInstance) {
     dbInstance = new DatabaseSync(DB_PATH);
     initTables(dbInstance);
+    registerGracefulShutdown();
   }
   return dbInstance;
 }
 
 function initTables(db: DatabaseSync) {
-  // WAL 모드 설정
+  // WAL 모드 및 동시 접근/내구성 PRAGMA 설정
+  db.exec('PRAGMA busy_timeout = 5000;');
   db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA synchronous = NORMAL;');
+  db.exec('PRAGMA foreign_keys = ON;');
 
   // 가족 구성원 테이블
   db.exec(`
@@ -167,5 +192,25 @@ function initTables(db: DatabaseSync) {
     }
 
     db.prepare("INSERT OR IGNORE INTO app_meta (key, value) VALUES ('migrated_cleaning_income', '1')").run();
+  }
+
+  // 조회 성능 유지를 위한 인덱스 보장 (월별, 구성원별, 구분별, 정기 템플릿)
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_transactions_user_date ON transactions(user_name, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_transactions_type_date ON transactions(type, date DESC);
+    CREATE INDEX IF NOT EXISTS idx_templates_type_day ON recurring_templates(type, day_of_month, id);
+  `);
+
+  const userVerRow = db.prepare('PRAGMA user_version').get() as { user_version: number } | undefined;
+  if (!userVerRow || userVerRow.user_version < 1) {
+    db.exec('PRAGMA user_version = 1;');
+  }
+
+  // 시작 시 쌓인 WAL 로그를 본체 파일에 안전하게 병합(PASSIVE)
+  try {
+    db.exec('PRAGMA wal_checkpoint(PASSIVE);');
+  } catch {
+    // 다른 연결이 점유 중이면 다음 기회로 넘김
   }
 }

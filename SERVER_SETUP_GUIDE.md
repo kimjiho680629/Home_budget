@@ -188,14 +188,17 @@ launchctl kickstart -k "gui/$(id -u)/com.kimjiho.home-budget-server"
   launchctl load -w ~/Library/LaunchAgents/com.kimjiho.home-budget-tunnel.plist
   ```
 
-### 가계부 데이터 백업 (자동 + 수동 + 앱 다운로드)
-가계부 DB(`data/budget.db`)는 Git에 올라가지 않으며, 아래 3가지 방법으로 안전하게 보호됩니다.
-1. **매일 새벽 03:30 자동 백업 (`launchd`)**: `com.kimjiho.home-budget-backup`이 `scripts/backup-db.mjs`를 실행해 `data/backups/budget_YYYY-MM-DD.db`에 저장합니다(최대 14개 보관).
-2. **웹 앱에서 즉시 다운로드**: 로그인 후 **설정 → 데이터 관리 / 정기내역 → DB 파일 즉시 백업(.db)** 버튼으로 스마트폰이나 PC에 바로 내려받을 수 있습니다.
-3. **터미널 수동 백업**:
+### 가계부 데이터 점검 · 백업 · 안전 복구 (유지보수)
+가계부 DB(`data/budget.db`)는 Git에 올라가지 않으며, WAL 동시 접근 대기(`busy_timeout=5000`), 조회 인덱스, 무결성 검증 백업으로 보호됩니다.
+1. **매일 새벽 03:30 자동 백업 (`launchd`)**: `com.kimjiho.home-budget-backup`이 `scripts/backup-db.mjs`를 실행해 `data/backups/budget_YYYY-MM-DD.db` 생성 및 무결성 검사 후 **iCloud Drive(`Home_Budget_Backups`)**에도 사본을 자동 저장합니다(각 최대 14개 보관).
+2. **웹 앱에서 상태 확인 및 즉시 다운로드**: 로그인 후 **설정 → 보안** 패널에서 DB 무결성·스키마 버전·백업 개수를 확인하고 **DB 백업 다운로드** 버튼으로 내려받을 수 있습니다.
+3. **터미널 점검 / 백업 / 복구 명령어**:
 ```bash
 cd /Users/kimjiho/Gemini_Project/Home_Budget
-node scripts/backup-db.mjs
+npm run db:check                                          # DB 무결성, WAL 크기, 인덱스, 백업 목록 점검
+npm run db:backup                                         # 즉시 백업 + 무결성 검증 + iCloud 사본 저장
+node scripts/restore-db.mjs --list                        # 복구 가능한 백업 목록 보기
+node scripts/restore-db.mjs data/backups/budget_YYYY-MM-DD.db --yes  # 서버 안전 정지 → 기존 DB 보관 → 복구 → 재시작
 ```
 
 ---

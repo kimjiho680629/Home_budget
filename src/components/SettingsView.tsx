@@ -42,6 +42,34 @@ export function SettingsView({
   const [addingTpl, setAddingTpl] = useState(false);
   const [applyingTplId, setApplyingTplId] = useState<number | null>(null);
   const [downloadingBackup, setDownloadingBackup] = useState(false);
+  const [dbHealth, setDbHealth] = useState<{
+    healthy: boolean;
+    schemaVersion: number;
+    txCount: number;
+    localBackupCount: number;
+    latestLocalBackup: string;
+    icloudBackupCount: number;
+    latestIcloudBackup: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch('/api/backup?info=1');
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!cancelled && json.success) {
+          setDbHealth(json.data);
+        }
+      } catch {
+        // 무시
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // --- 비밀번호 변경 상태 ---
   const [currentPassword, setCurrentPassword] = useState('');
@@ -1091,6 +1119,36 @@ export function SettingsView({
             </button>
           </div>
         </div>
+
+        {dbHealth && (
+          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`px-2 py-0.5 rounded-full font-bold ${
+                  dbHealth.healthy
+                    ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300'
+                }`}
+              >
+                {dbHealth.healthy ? 'DB 무결성 정상' : 'DB 점검 필요'}
+              </span>
+              <span>스키마 v{dbHealth.schemaVersion}</span>
+              <span>•</span>
+              <span>총 거래 {dbHealth.txCount}건</span>
+            </div>
+            <div className="text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-2">
+              <span>
+                로컬 백업 {dbHealth.localBackupCount}개
+                {dbHealth.latestLocalBackup ? ` (${dbHealth.latestLocalBackup})` : ''}
+              </span>
+              <span>•</span>
+              <span>
+                iCloud 사본 {dbHealth.icloudBackupCount}개
+                {dbHealth.latestIcloudBackup ? ` (${dbHealth.latestIcloudBackup})` : ''}
+              </span>
+            </div>
+          </div>
+        )}
 
         {envManagedAuth ? (
           <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-xs text-amber-800 dark:text-amber-300">
