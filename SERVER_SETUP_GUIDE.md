@@ -13,7 +13,7 @@
 - **Cloudflare Tunnel 클라이언트**: `cloudflared 2026.11.0` (`/opt/homebrew/bin/cloudflared`)
 - **웹 서버 포트**: `3000` (`http://localhost:3000`)
 - **데이터베이스**: `data/budget.db` (`node:sqlite`, WAL 모드, `.gitignore`로 Git 추적 제외)
-- **일일 자동 백업**: `data/backups/budget_YYYY-MM-DD.db` (매일 03:30 `launchd` 자동 스냅샷, 최대 30개 보관)
+- **일일 자동 백업**: `data/backups/budget_YYYY-MM-DD.db` (매일 03:30 `launchd` 자동 스냅샷, 최대 14개 보관)
 
 ---
 
@@ -190,7 +190,7 @@ launchctl kickstart -k "gui/$(id -u)/com.kimjiho.home-budget-server"
 
 ### 가계부 데이터 백업 (자동 + 수동 + 앱 다운로드)
 가계부 DB(`data/budget.db`)는 Git에 올라가지 않으며, 아래 3가지 방법으로 안전하게 보호됩니다.
-1. **매일 새벽 03:30 자동 백업 (`launchd`)**: `com.kimjiho.home-budget-backup`이 `scripts/backup-db.mjs`를 실행해 `data/backups/budget_YYYY-MM-DD.db`에 저장합니다(최대 30개 보관).
+1. **매일 새벽 03:30 자동 백업 (`launchd`)**: `com.kimjiho.home-budget-backup`이 `scripts/backup-db.mjs`를 실행해 `data/backups/budget_YYYY-MM-DD.db`에 저장합니다(최대 14개 보관).
 2. **웹 앱에서 즉시 다운로드**: 로그인 후 **설정 → 데이터 관리 / 정기내역 → DB 파일 즉시 백업(.db)** 버튼으로 스마트폰이나 PC에 바로 내려받을 수 있습니다.
 3. **터미널 수동 백업**:
 ```bash
