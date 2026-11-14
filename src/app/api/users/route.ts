@@ -86,6 +86,7 @@ export async function PUT(request: Request) {
       db.prepare('UPDATE users SET name = ?, color = ? WHERE id = ?').run(name, color, id);
       if (current.name !== name) {
         db.prepare('UPDATE transactions SET user_name = ? WHERE user_name = ?').run(name, current.name);
+        db.prepare('UPDATE recurring_templates SET user_name = ? WHERE user_name = ?').run(name, current.name);
       }
       db.exec('COMMIT');
     } catch (txErr) {

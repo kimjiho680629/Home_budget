@@ -189,11 +189,14 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const id = Number(searchParams.get('id'));
 
-    if (!id) {
+    if (!Number.isInteger(id) || id <= 0) {
       return NextResponse.json({ success: false, error: '삭제할 ID가 없습니다.' }, { status: 400 });
     }
 
-    db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+    const info = db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+    if (info.changes === 0) {
+      return NextResponse.json({ success: false, error: '해당 내역을 찾을 수 없습니다.' }, { status: 404 });
+    }
     return NextResponse.json({ success: true, message: '삭제되었습니다.' });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : '알 수 없는 오류';

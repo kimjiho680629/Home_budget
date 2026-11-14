@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pencil, Trash2, Check, X, Plus, Users, Tag, Lock, LogOut, Repeat, HardDriveDownload } from 'lucide-react';
 import type { Category, RecurringTemplate, TransactionType, User } from '@/types/budget';
 import { CATEGORY_ICON_OPTIONS, COLOR_PALETTE, PAYMENT_METHODS } from '@/lib/constants';
 import { formatAUD } from '@/lib/currency';
+import { getLocalDateStr } from '@/lib/date';
 import { apiFetch } from '@/lib/api-client';
 import { CategoryIcon } from './CategoryIcon';
 
@@ -247,11 +248,17 @@ export function SettingsView({
     }
   };
 
-  const visibleCategories = categories.filter((c) => c.type === catTab);
-  const tplCategories = categories.filter((c) => c.type === tplType);
+  const visibleCategories = useMemo(
+    () => categories.filter((c) => c.type === catTab),
+    [categories, catTab]
+  );
+  const tplCategories = useMemo(
+    () => categories.filter((c) => c.type === tplType),
+    [categories, tplType]
+  );
 
   useEffect(() => {
-    if (!tplUser && users.length > 0) {
+    if (users.length > 0 && (!tplUser || !users.some((u) => u.name === tplUser))) {
       setTplUser(users[0].name);
     }
     if (tplCategories.length > 0 && !tplCategories.some((c) => c.name === tplCategory)) {
@@ -352,7 +359,7 @@ export function SettingsView({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `home_budget_backup_${new Date().toISOString().slice(0, 10)}.db`;
+      a.download = `home_budget_backup_${getLocalDateStr()}.db`;
       document.body.appendChild(a);
       a.click();
       a.remove();

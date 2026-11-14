@@ -152,11 +152,7 @@ export default function BudgetApp() {
   };
 
   const changeMonth = (offset: number) => {
-    setCurrentDate((prev) => {
-      const d = new Date(prev);
-      d.setMonth(d.getMonth() + offset);
-      return d;
-    });
+    setCurrentDate((prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
   };
 
   const openAddTab = (tx: Transaction | null = null, duplicateSource: Transaction | null = null) => {
@@ -199,7 +195,7 @@ export default function BudgetApp() {
   const pageTitleMap: Record<TabType, string> = {
     dashboard: '대시보드',
     list: '거래 내역',
-    add: editingTx ? '내역 수정' : '새 내역 입력',
+    add: editingTx ? '내역 수정' : duplicatingTx ? '내역 복사 등록' : '새 내역 입력',
     stats: '통계 분석',
     settings: '가족 · 카테고리 설정',
   };
@@ -258,6 +254,7 @@ export default function BudgetApp() {
                 type="button"
                 onClick={() => {
                   setEditingTx(null);
+                  setDuplicatingTx(null);
                   setTab(item.id);
                 }}
                 className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-bold transition cursor-pointer ${
@@ -501,6 +498,7 @@ export default function BudgetApp() {
           type="button"
           onClick={() => {
             setEditingTx(null);
+            setDuplicatingTx(null);
             setTab('dashboard');
           }}
           className={`flex flex-col items-center gap-1 p-1.5 transition cursor-pointer ${
@@ -517,6 +515,7 @@ export default function BudgetApp() {
           type="button"
           onClick={() => {
             setEditingTx(null);
+            setDuplicatingTx(null);
             setTab('list');
           }}
           className={`flex flex-col items-center gap-1 p-1.5 transition cursor-pointer ${
@@ -544,6 +543,7 @@ export default function BudgetApp() {
           type="button"
           onClick={() => {
             setEditingTx(null);
+            setDuplicatingTx(null);
             setTab('stats');
           }}
           className={`flex flex-col items-center gap-1 p-1.5 transition cursor-pointer ${
@@ -560,6 +560,7 @@ export default function BudgetApp() {
           type="button"
           onClick={() => {
             setEditingTx(null);
+            setDuplicatingTx(null);
             setTab('settings');
           }}
           className={`flex flex-col items-center gap-1 p-1.5 transition cursor-pointer ${

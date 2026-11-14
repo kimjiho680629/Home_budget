@@ -354,12 +354,16 @@ export function StatsView({
           <button
             type="button"
             disabled={exporting || !exportStart || !exportEnd}
-            onClick={() =>
+            onClick={() => {
+              if (exportStart > exportEnd) {
+                alert('시작일은 종료일보다 빠르거나 같아야 합니다.');
+                return;
+              }
               downloadCsv(
                 { startDate: exportStart, endDate: exportEnd },
                 `home_budget_${exportStart}_to_${exportEnd}.csv`
-              )
-            }
+              );
+            }}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
           >
             <Download size={14} />

@@ -104,6 +104,11 @@ export async function PUT(request: Request) {
           current.name,
           current.type
         );
+        db.prepare('UPDATE recurring_templates SET category = ? WHERE category = ? AND type = ?').run(
+          name,
+          current.name,
+          current.type
+        );
       }
       db.exec('COMMIT');
     } catch (txErr) {

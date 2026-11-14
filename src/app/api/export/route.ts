@@ -31,15 +31,27 @@ export async function GET(request: Request) {
     let query = 'SELECT * FROM transactions WHERE 1=1';
     const params: string[] = [];
 
-    if (month && isValidMonthStr(month)) {
+    if (month) {
+      if (!isValidMonthStr(month)) {
+        return NextResponse.json({ success: false, error: '올바른 월 형식(YYYY-MM)이 아닙니다.' }, { status: 400 });
+      }
       query += " AND strftime('%Y-%m', date) = ?";
       params.push(month);
     } else {
-      if (startDate && isValidDateStr(startDate)) {
+      if (startDate && !isValidDateStr(startDate)) {
+        return NextResponse.json({ success: false, error: '시작일 형식(YYYY-MM-DD)이 올바르지 않습니다.' }, { status: 400 });
+      }
+      if (endDate && !isValidDateStr(endDate)) {
+        return NextResponse.json({ success: false, error: '종료일 형식(YYYY-MM-DD)이 올바르지 않습니다.' }, { status: 400 });
+      }
+      if (startDate && endDate && startDate > endDate) {
+        return NextResponse.json({ success: false, error: '시작일이 종료일보다 늦을 수 없습니다.' }, { status: 400 });
+      }
+      if (startDate) {
         query += ' AND date >= ?';
         params.push(startDate);
       }
-      if (endDate && isValidDateStr(endDate)) {
+      if (endDate) {
         query += ' AND date <= ?';
         params.push(endDate);
       }

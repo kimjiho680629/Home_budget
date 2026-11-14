@@ -60,7 +60,7 @@ export function TransactionForm({
     [categories, type]
   );
 
-  // 수정/복사 대상이 바뀌거나 초기 목록 로드 시 기본값 동기화
+  // 수정 또는 복사 대상이 바뀔 때만 폼 전체를 해당 내역으로 초기화
   useEffect(() => {
     if (editingTx) {
       setType(editingTx.type);
@@ -71,6 +71,7 @@ export function TransactionForm({
       setMemo(editingTx.memo || '');
       setPaymentMethod(editingTx.payment_method || '카드');
       setSaveAsTemplate(false);
+      setTemplateTitle('');
     } else if (duplicatingTx) {
       setType(duplicatingTx.type);
       setAmount(String(duplicatingTx.amount));
@@ -80,13 +81,18 @@ export function TransactionForm({
       setMemo(duplicatingTx.memo || '');
       setPaymentMethod(duplicatingTx.payment_method || '카드');
       setSaveAsTemplate(false);
-    } else {
-      if (!userName && users.length > 0) {
-        setUserName(users[0].name);
-      }
-      if (filteredCategories.length > 0 && !filteredCategories.some((c) => c.name === category)) {
-        setCategory(filteredCategories[0].name);
-      }
+      setTemplateTitle('');
+    }
+  }, [editingTx, duplicatingTx]);
+
+  // 신규 입력 상태에서 목록 로드/유형 전환 시 비어있는 기본값만 안전하게 채움
+  useEffect(() => {
+    if (editingTx || duplicatingTx) return;
+    if (users.length > 0 && (!userName || !users.some((u) => u.name === userName))) {
+      setUserName(users[0].name);
+    }
+    if (filteredCategories.length > 0 && !filteredCategories.some((c) => c.name === category)) {
+      setCategory(filteredCategories[0].name);
     }
   }, [editingTx, duplicatingTx, users, filteredCategories, userName, category]);
 
