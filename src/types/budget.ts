@@ -26,6 +26,13 @@ export interface UserAmount {
   total: number;
 }
 
+export interface MonthlyTrendPoint {
+  month: string;
+  totalIncome: number;
+  totalExpense: number;
+  balance: number;
+}
+
 export interface SummaryData {
   month: string;
   totalIncome: number;
@@ -35,6 +42,20 @@ export interface SummaryData {
   categoryExpenses: CategoryAmount[];
   categoryIncomes: CategoryAmount[];
   userExpenses: UserAmount[];
+  monthlyTrend: MonthlyTrendPoint[];
+}
+
+export interface RecurringTemplate {
+  id: number;
+  title: string;
+  type: TransactionType;
+  amount: number;
+  category: string;
+  user_name: string;
+  payment_method: string;
+  memo: string;
+  day_of_month: number;
+  created_at?: string;
 }
 
 export interface User {

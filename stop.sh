@@ -8,6 +8,17 @@ LOG_DIR="$BASE_DIR/logs"
 
 echo "가계부 서버 및 Cloudflare 터널을 종료합니다..."
 
+# macOS LaunchAgent가 로드된 경우 KeepAlive 재시작을 막기 위해 함께 언로드
+if command -v launchctl >/dev/null 2>&1; then
+  for plist in \
+    "$HOME/Library/LaunchAgents/com.kimjiho.home-budget-tunnel.plist" \
+    "$HOME/Library/LaunchAgents/com.kimjiho.home-budget-server.plist"; do
+    if [ -f "$plist" ]; then
+      launchctl unload "$plist" 2>/dev/null || true
+    fi
+  done
+fi
+
 STOPPED_SERVER=0
 if [ -f "$LOG_DIR/server.pid" ]; then
   kill "$(cat "$LOG_DIR/server.pid")" 2>/dev/null && STOPPED_SERVER=1

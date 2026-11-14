@@ -1,28 +1,46 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Pencil, Trash2, Check, X, Plus, Users, Tag, Lock, LogOut } from 'lucide-react';
-import type { Category, TransactionType, User } from '@/types/budget';
-import { CATEGORY_ICON_OPTIONS, COLOR_PALETTE } from '@/lib/constants';
+import React, { useEffect, useState } from 'react';
+import { Pencil, Trash2, Check, X, Plus, Users, Tag, Lock, LogOut, Repeat, HardDriveDownload } from 'lucide-react';
+import type { Category, RecurringTemplate, TransactionType, User } from '@/types/budget';
+import { CATEGORY_ICON_OPTIONS, COLOR_PALETTE, PAYMENT_METHODS } from '@/lib/constants';
+import { formatAUD } from '@/lib/currency';
+import { apiFetch } from '@/lib/api-client';
 import { CategoryIcon } from './CategoryIcon';
 
 interface SettingsViewProps {
   users: User[];
   categories: Category[];
+  templates: RecurringTemplate[];
+  currentMonthStr: string;
   envManagedAuth?: boolean;
   onRefresh: () => Promise<void>;
   onLogout: () => Promise<void>;
 }
 
-// 가족 구성원 및 카테고리 직접 관리 화면 (PC 2컬럼 / 모바일 1컬럼·서브탭)
+// 가족 구성원, 카테고리, 정기 템플릿, 보안 및 DB 백업 설정 화면
 export function SettingsView({
   users,
   categories,
+  templates,
+  currentMonthStr,
   envManagedAuth = false,
   onRefresh,
   onLogout,
 }: SettingsViewProps) {
-  const [mobileSection, setMobileSection] = useState<'family' | 'category' | 'security'>('family');
+  const [mobileSection, setMobileSection] = useState<'family' | 'category' | 'templates' | 'security'>('family');
+
+  // --- 정기 템플릿 추가 상태 ---
+  const [tplTitle, setTplTitle] = useState('');
+  const [tplType, setTplType] = useState<TransactionType>('expense');
+  const [tplAmount, setTplAmount] = useState('');
+  const [tplCategory, setTplCategory] = useState('');
+  const [tplUser, setTplUser] = useState('');
+  const [tplPayment, setTplPayment] = useState('카드');
+  const [tplDay, setTplDay] = useState('1');
+  const [addingTpl, setAddingTpl] = useState(false);
+  const [applyingTplId, setApplyingTplId] = useState<number | null>(null);
+  const [downloadingBackup, setDownloadingBackup] = useState(false);
 
   // --- 비밀번호 변경 상태 ---
   const [currentPassword, setCurrentPassword] = useState('');
@@ -61,11 +79,12 @@ export function SettingsView({
     if (!trimmed) return;
     try {
       setAddingUser(true);
-      const res = await fetch('/api/users', {
+      const res = await apiFetch('/api/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed, color: newUserColor }),
       });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
         setNewUserName('');
@@ -95,11 +114,12 @@ export function SettingsView({
       return;
     }
     try {
-      const res = await fetch('/api/users', {
+      const res = await apiFetch('/api/users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, name: trimmed, color: editUserColor }),
       });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
         setEditingUserId(null);
@@ -121,7 +141,8 @@ export function SettingsView({
     if (!confirm(countMsg)) return;
 
     try {
-      const res = await fetch(`/api/users?id=${u.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/users?id=${u.id}`, { method: 'DELETE' });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
         await onRefresh();
@@ -140,7 +161,7 @@ export function SettingsView({
     if (!trimmed) return;
     try {
       setAddingCat(true);
-      const res = await fetch('/api/categories', {
+      const res = await apiFetch('/api/categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -150,6 +171,7 @@ export function SettingsView({
           icon: newCatIcon,
         }),
       });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
         setNewCatName('');
@@ -180,7 +202,7 @@ export function SettingsView({
       return;
     }
     try {
-      const res = await fetch('/api/categories', {
+      const res = await apiFetch('/api/categories', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -190,6 +212,7 @@ export function SettingsView({
           icon: editCatIcon,
         }),
       });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
         setEditingCatId(null);
@@ -211,7 +234,8 @@ export function SettingsView({
     if (!confirm(countMsg)) return;
 
     try {
-      const res = await fetch(`/api/categories?id=${c.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/categories?id=${c.id}`, { method: 'DELETE' });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
         await onRefresh();
@@ -224,6 +248,121 @@ export function SettingsView({
   };
 
   const visibleCategories = categories.filter((c) => c.type === catTab);
+  const tplCategories = categories.filter((c) => c.type === tplType);
+
+  useEffect(() => {
+    if (!tplUser && users.length > 0) {
+      setTplUser(users[0].name);
+    }
+    if (tplCategories.length > 0 && !tplCategories.some((c) => c.name === tplCategory)) {
+      setTplCategory(tplCategories[0].name);
+    }
+  }, [users, tplCategories, tplUser, tplCategory]);
+
+  // 정기 템플릿 추가
+  const handleAddTemplate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedTitle = tplTitle.trim();
+    const numericAmount = Number(tplAmount);
+    if (!trimmedTitle || !numericAmount || numericAmount <= 0 || !tplCategory || !tplUser) {
+      alert('템플릿 이름, 금액, 카테고리, 작성자를 모두 입력하세요.');
+      return;
+    }
+    try {
+      setAddingTpl(true);
+      const res = await apiFetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: trimmedTitle,
+          type: tplType,
+          amount: numericAmount,
+          category: tplCategory,
+          user_name: tplUser,
+          payment_method: tplPayment,
+          memo: trimmedTitle,
+          day_of_month: Number(tplDay) || 1,
+        }),
+      });
+      if (res.status === 401) return;
+      const data = await res.json();
+      if (data.success) {
+        setTplTitle('');
+        setTplAmount('');
+        await onRefresh();
+      } else {
+        alert(data.error || '템플릿 추가에 실패했습니다.');
+      }
+    } catch {
+      alert('템플릿 추가 중 오류가 발생했습니다.');
+    } finally {
+      setAddingTpl(false);
+    }
+  };
+
+  const handleApplyTemplate = async (tpl: RecurringTemplate) => {
+    try {
+      setApplyingTplId(tpl.id);
+      const res = await apiFetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'apply', id: tpl.id, month: currentMonthStr }),
+      });
+      if (res.status === 401) return;
+      const data = await res.json();
+      if (data.success) {
+        await onRefresh();
+        alert(`'${tpl.title}' 내역을 ${currentMonthStr} 가계부에 등록했습니다.`);
+      } else {
+        alert(data.error || '등록에 실패했습니다.');
+      }
+    } catch {
+      alert('등록 중 오류가 발생했습니다.');
+    } finally {
+      setApplyingTplId(null);
+    }
+  };
+
+  const handleDeleteTemplate = async (tpl: RecurringTemplate) => {
+    if (!confirm(`'${tpl.title}' 정기 템플릿을 삭제하시겠습니까?`)) return;
+    try {
+      const res = await apiFetch(`/api/templates?id=${tpl.id}`, { method: 'DELETE' });
+      if (res.status === 401) return;
+      const data = await res.json();
+      if (data.success) {
+        await onRefresh();
+      } else {
+        alert(data.error || '삭제에 실패했습니다.');
+      }
+    } catch {
+      alert('삭제 중 오류가 발생했습니다.');
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    try {
+      setDownloadingBackup(true);
+      const res = await apiFetch('/api/backup');
+      if (res.status === 401) return;
+      if (!res.ok) {
+        alert('백업 파일 생성에 실패했습니다.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `home_budget_backup_${new Date().toISOString().slice(0, 10)}.db`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('백업 다운로드 중 오류가 발생했습니다.');
+    } finally {
+      setDownloadingBackup(false);
+    }
+  };
 
   // 비밀번호 변경
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -243,11 +382,15 @@ export function SettingsView({
     }
     try {
       setChangingPassword(true);
-      const res = await fetch('/api/auth', {
+      const res = await apiFetch('/api/auth', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
+      if (res.status === 401) {
+        setPasswordMsg({ type: 'err', text: '현재 비밀번호가 올바르지 않거나 세션이 만료되었습니다.' });
+        return;
+      }
       const data = await res.json();
       if (data.success) {
         setCurrentPassword('');
@@ -267,39 +410,50 @@ export function SettingsView({
   return (
     <div className="space-y-4">
       {/* 모바일 전용 서브 탭 전환 */}
-      <div className="lg:hidden grid grid-cols-3 gap-1.5 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-2xl">
+      <div className="lg:hidden grid grid-cols-4 gap-1 bg-slate-200/70 dark:bg-slate-800 p-1 rounded-2xl">
         <button
           type="button"
           onClick={() => setMobileSection('family')}
-          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+          className={`py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
             mobileSection === 'family'
               ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
               : 'text-slate-600 dark:text-slate-400'
           }`}
         >
-          <Users size={14} /> 구성원
+          <Users size={13} /> 구성원
         </button>
         <button
           type="button"
           onClick={() => setMobileSection('category')}
-          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+          className={`py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
             mobileSection === 'category'
               ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
               : 'text-slate-600 dark:text-slate-400'
           }`}
         >
-          <Tag size={14} /> 카테고리
+          <Tag size={13} /> 카테고리
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileSection('templates')}
+          className={`py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+            mobileSection === 'templates'
+              ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+              : 'text-slate-600 dark:text-slate-400'
+          }`}
+        >
+          <Repeat size={13} /> 정기내역
         </button>
         <button
           type="button"
           onClick={() => setMobileSection('security')}
-          className={`py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+          className={`py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
             mobileSection === 'security'
               ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
               : 'text-slate-600 dark:text-slate-400'
           }`}
         >
-          <Lock size={14} /> 비밀번호
+          <Lock size={13} /> 보안
         </button>
       </div>
 
@@ -710,7 +864,191 @@ export function SettingsView({
         </section>
       </div>
 
-      {/* 3. 보안 · 로그인 비밀번호 관리 패널 */}
+      {/* 3. 고정 지출 · 정기 수입 템플릿 관리 패널 */}
+      <section
+        className={`bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 ${
+          mobileSection === 'templates' ? 'block' : 'hidden lg:block'
+        }`}
+      >
+        <div>
+          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Repeat size={18} className="text-indigo-500" />
+            고정 지출 · 정기 수입 템플릿
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            매달 반복되는 정기청소 수입, 집세, 통신비, 보험료 등을 저장해 두고 버튼 한 번으로 {currentMonthStr} 가계부에 등록하세요.
+          </p>
+        </div>
+
+        {templates.length === 0 ? (
+          <div className="p-4 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+            아직 등록된 정기 템플릿이 없습니다. 아래에서 자주 쓰는 내역을 추가해 보세요.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden">
+            {templates.map((tpl) => (
+              <div
+                key={tpl.id}
+                className="px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${
+                        tpl.type === 'expense'
+                          ? 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
+                          : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                      }`}
+                    >
+                      {tpl.type === 'expense' ? '지출' : '수입'}
+                    </span>
+                    <span className="truncate">{tpl.title}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    매월 {tpl.day_of_month}일 • {tpl.category} • {tpl.user_name} • {tpl.payment_method}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    className={`text-sm font-extrabold ${
+                      tpl.type === 'expense'
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    {formatAUD(tpl.amount)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={applyingTplId === tpl.id}
+                    onClick={() => handleApplyTemplate(tpl)}
+                    className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs font-bold transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {applyingTplId === tpl.id ? '등록중' : '이번 달 등록'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteTemplate(tpl)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer"
+                    title="삭제"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form
+          onSubmit={handleAddTemplate}
+          className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 items-end"
+        >
+          <div className="lg:col-span-2">
+            <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+              템플릿 이름
+            </label>
+            <input
+              type="text"
+              placeholder="예: 월세, 인터넷, 정기청소 A업체"
+              value={tplTitle}
+              onChange={(e) => setTplTitle(e.target.value)}
+              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+              구분 / 날짜(일)
+            </label>
+            <div className="flex gap-1.5">
+              <select
+                value={tplType}
+                onChange={(e) => setTplType(e.target.value as TransactionType)}
+                className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs font-bold outline-none"
+              >
+                <option value="expense">지출</option>
+                <option value="income">수입</option>
+              </select>
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={tplDay}
+                onChange={(e) => setTplDay(e.target.value)}
+                title="매월 며칠"
+                className="w-14 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs text-center font-bold outline-none"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+              금액 (AUD)
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              placeholder="0.00"
+              value={tplAmount}
+              onChange={(e) => setTplAmount(e.target.value)}
+              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+              카테고리 / 작성자
+            </label>
+            <div className="flex gap-1.5">
+              <select
+                value={tplCategory}
+                onChange={(e) => setTplCategory(e.target.value)}
+                className="flex-1 min-w-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs outline-none"
+              >
+                {tplCategories.map((c) => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={tplUser}
+                onChange={(e) => setTplUser(e.target.value)}
+                className="w-20 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs outline-none"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.name}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-1.5">
+            <select
+              value={tplPayment}
+              onChange={(e) => setTplPayment(e.target.value)}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 py-2 text-xs outline-none"
+            >
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              disabled={addingTpl}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3 py-2 rounded-xl text-xs inline-flex items-center justify-center gap-1 transition disabled:opacity-50 cursor-pointer"
+            >
+              <Plus size={14} /> 추가
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {/* 4. 보안 · 로그인 비밀번호 및 DB 백업 패널 */}
       <section
         className={`bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs space-y-4 ${
           mobileSection === 'security' ? 'block' : 'hidden lg:block'
@@ -720,20 +1058,31 @@ export function SettingsView({
           <div>
             <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Lock size={18} className="text-emerald-500" />
-              로그인 비밀번호 · 잠금 설정
+              로그인 비밀번호 · 데이터 백업
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              외부 접속 보안을 위해 로그인 비밀번호를 변경하거나 현재 브라우저를 잠글 수 있습니다.
+              외부 접속 보안을 위해 로그인 비밀번호를 변경하거나 가계부 DB 백업본을 내려받을 수 있습니다.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer shrink-0"
-          >
-            <LogOut size={15} />
-            <span>로그아웃 (잠금)</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={downloadingBackup}
+              onClick={handleDownloadBackup}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-xs font-bold transition disabled:opacity-50 cursor-pointer"
+            >
+              <HardDriveDownload size={15} />
+              <span>{downloadingBackup ? '백업 생성 중...' : 'DB 백업 다운로드'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+            >
+              <LogOut size={15} />
+              <span>로그아웃 (잠금)</span>
+            </button>
+          </div>
         </div>
 
         {envManagedAuth ? (

@@ -78,6 +78,22 @@ function initTables(db: DatabaseSync) {
     );
   `);
 
+  // 고정 지출 · 정기 수입 반복 템플릿 테이블
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS recurring_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      type TEXT NOT NULL, -- 'expense' or 'income'
+      amount REAL NOT NULL,
+      category TEXT NOT NULL,
+      user_name TEXT NOT NULL,
+      payment_method TEXT DEFAULT '카드',
+      memo TEXT DEFAULT '',
+      day_of_month INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
   const seededRow = db.prepare("SELECT value FROM app_meta WHERE key = 'seeded_defaults'").get() as
     | { value: string }
     | undefined;

@@ -7,12 +7,13 @@
 ## 1. 시스템 및 설치 환경 요약
 
 - **프로젝트 경로**: `/Users/kimjiho/Gemini_Project/Home_Budget`
-- **원본 저장소**: `https://github.com/kimjiho680629/Home_Budget.git`
+- **원본 저장소**: `https://github.com/kimjiho680629/Home_budget.git`
 - **운영체제 / 기기**: `macOS 27.2.1` (`MacBookPro18,1`)
 - **Node.js / npm**: `v22.18.0` (`/Users/kimjiho/.nvm/versions/node/v22.18.0/bin/node`) / `11.10.0`
 - **Cloudflare Tunnel 클라이언트**: `cloudflared 2026.11.0` (`/opt/homebrew/bin/cloudflared`)
 - **웹 서버 포트**: `3000` (`http://localhost:3000`)
 - **데이터베이스**: `data/budget.db` (`node:sqlite`, WAL 모드, `.gitignore`로 Git 추적 제외)
+- **일일 자동 백업**: `data/backups/budget_YYYY-MM-DD.db` (매일 03:30 `launchd` 자동 스냅샷, 최대 30개 보관)
 
 ---
 
@@ -34,15 +35,40 @@
 | `src/components/SettingsView.tsx` | **로그인 비밀번호 · 잠금 설정** 패널 추가 (비밀번호 변경 및 로그아웃 버튼) |
 | `src/app/page.tsx` | 초기 진입 시 `/api/auth` 확인, 미인증 시 `LoginScreen` 표시, API `401` 수신 시 자동 잠금, 사이드바 로그아웃 버튼 추가 |
 | `scripts/set-password.mjs` | 터미널에서 비밀번호를 즉시 설정/초기화하는 CLI 스크립트 |
-| `.env.local.example` | `CLOUDFLARE_TUNNEL_TOKEN`, `PUBLIC_URL`, 선택적 `APP_PASSWORD` 예시 추가 |
+| `.env.local.example` | `CLOUDFLARE_TUNNEL_TOKEN`, `PUBLIC_URL`, 선택적 `APP_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` 예시 |
 
-### B. macOS 상시 서버 자동 실행 (`launchd`) 스크립트 및 설정
+### B. 가계부 핵심 기능·버그 수정 및 확장 기능
 | 파일 경로 | 역할 |
 | :--- | :--- |
-| `scripts/run-server.sh` | `launchd` 전용 포그라운드 서버 실행기 (`.env.local` 로드, 미빌드 시 자동 빌드, `/usr/bin/caffeinate -s`로 AC 전원 유휴 잠자기 방지 실행) |
-| `scripts/run-tunnel.sh` | `launchd` 전용 포그라운드 터널 실행기 (`.env.local`의 `CLOUDFLARE_TUNNEL_TOKEN` 있으면 고정 터널, 없으면 무료 Quick Tunnel 실행 후 `CURRENT_URL.txt` 자동 갱신) |
+| `src/lib/date.ts` | 로컬 타임존 기준 날짜/월 계산(`getLocalDateStr`, `getLocalMonthStr`), 날짜 검증, 최근 6개월·호주 회계연도(`FY 7/1~6/30`) 유틸 |
+| `src/lib/api-client.ts` | 전역 `apiFetch` 래퍼 (`401` 수신 시 `home-budget:unauthorized` 이벤트 발행하여 모든 하위 컴포넌트 자동 잠금) |
+| `src/lib/db.ts` | `recurring_templates` 테이블 추가 등 SQLite 스키마 관리 |
+| `src/types/budget.ts` | `MonthlyTrendPoint`, `RecurringTemplate` 등 공용 타입 정의 |
+| `src/app/api/budgets/route.ts` | 월별 목표 예산 `GET/PUT` API |
+| `src/app/api/templates/route.ts` | 고정 지출·정기 수입 템플릿 `GET/POST(생성·즉시반영)/DELETE` API |
+| `src/app/api/export/route.ts` | Excel 호환 UTF-8 BOM CSV 내보내기 API (수식 인젝션 방어 포함) |
+| `src/app/api/backup/route.ts` | WAL 안전 스냅샷(`VACUUM INTO`) SQLite DB 파일 즉시 다운로드 API |
+| `src/app/api/summary/route.ts` | 월간 요약 + 최근 6개월 수입·지출·순수입 추이(`monthlyTrend`) + 월 형식 검증 |
+| `src/app/api/transactions/route.ts` | 전체 월 검색(`allMonths`), 기간(`startDate/endDate`), 구분/결제수단 필터 및 `type`·`YYYY-MM-DD` 엄격 검증 |
+| `src/components/DashboardView.tsx` | 월별 목표 예산 인라인 설정/진행률 바 및 정기 내역 일괄 반영 버튼 |
+| `src/components/TransactionForm.tsx` | 호주 로컬 날짜(`getLocalDateStr()`) 버그 수정, 복제 등록(`duplicatingTx`), 정기 템플릿 칩 원클릭 채우기 및 템플릿 동시 저장 |
+| `src/components/TransactionsView.tsx` | 결제수단 필터, 정렬(최신/과거/금액순), 전체 월 검색 토글, 거래 복제(`Copy`) 버튼 |
+| `src/components/StatsView.tsx` | 최근 6개월 수입·지출 추이 막대 그래프 및 CSV 내보내기(당월/호주 회계연도/사용자 지정 기간) |
+| `src/components/SettingsView.tsx` | `정기내역` 관리 탭(템플릿 CRUD·단건 즉시 반영), SQLite DB 백업 다운로드 버튼, `apiFetch` 적용 |
+| `src/components/ConnectModal.tsx` | `apiFetch` 전환 |
+| `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png` | 모바일 홈 화면 추가(PWA/iOS)용 PNG 아이콘 및 `public/manifest.json` / `src/app/layout.tsx` 메타데이터 연결 |
+| `package.json` | 미사용 `better-sqlite3` 제거 및 `"typecheck": "tsc --noEmit"` 스크립트 추가 |
+
+### C. macOS 상시 서버 자동 실행 (`launchd`), 로그 로테이션 및 자동 백업
+| 파일 경로 | 역할 |
+| :--- | :--- |
+| `scripts/run-server.sh` | `launchd` 전용 포그라운드 서버 실행기 (`.env.local` 로드, 미빌드 시 자동 빌드, 5MB 초과 로그 로테이션, `/usr/bin/caffeinate -s` 유휴 잠자기 방지) |
+| `scripts/run-tunnel.sh` | `launchd` 전용 포그라운드 터널 실행기 (5MB 로그 로테이션, `CLOUDFLARE_TUNNEL_TOKEN` 지원, Quick Tunnel `CURRENT_URL.txt` 갱신 및 텔레그램 URL 변경 알림 옵션) |
+| `scripts/backup-db.mjs` | `node:sqlite` `VACUUM INTO` 기반 무중단 DB 스냅샷 생성 및 30일 초과 백업 자동 정리 |
+| `start.sh`, `status.sh`, `stop.sh` | macOS `ipconfig getifaddr en0/en1` 기반 사설 IP 검출 수정 및 `stop.sh`의 `launchd` unload 지원 |
 | `~/Library/LaunchAgents/com.kimjiho.home-budget-server.plist` | 로그인/재부팅 시 가계부 웹 서버 자동 실행 및 종료 시 자동 재시작(`KeepAlive`) |
 | `~/Library/LaunchAgents/com.kimjiho.home-budget-tunnel.plist` | 로그인/재부팅 시 Cloudflare 터널 자동 실행 및 종료 시 자동 재시작(`KeepAlive`) |
+| `~/Library/LaunchAgents/com.kimjiho.home-budget-backup.plist` | 매일 새벽 `03:30` `scripts/backup-db.mjs` 자동 실행 |
 
 ---
 
@@ -131,7 +157,14 @@ cd /Users/kimjiho/Gemini_Project/Home_Budget
 launchctl list | grep home-budget
 ```
 - 서버 로그: `logs/launchd-server.log`
-- 터널 로그: `logs/launchd-tunnel.log`
+- 터널 로그: `logs/launchd-tunnel.log` *(서버·터널 로그는 5MB 초과 시 `.1`로 자동 로테이션됩니다)*
+
+### (선택) Quick Tunnel 주소 변경 시 텔레그램 알림 받기
+`.env.local`에 아래 두 값을 추가하고 터널을 재시작하면, 재부팅 등으로 `*.trycloudflare.com` 주소가 바뀔 때마다 텔레그램으로 새 URL을 전송합니다.
+```env
+TELEGRAM_BOT_TOKEN=텔레그램_봇_토큰
+TELEGRAM_CHAT_ID=본인_채팅_ID
+```
 
 ### 코드 수정 후 서버 반영 (빌드 + 재시작)
 추후 기능 추가나 UI/API 수정이 끝난 뒤에는 반드시 아래 순서로 빌드 및 재시작을 실행하세요.
@@ -155,19 +188,22 @@ launchctl kickstart -k "gui/$(id -u)/com.kimjiho.home-budget-server"
   launchctl load -w ~/Library/LaunchAgents/com.kimjiho.home-budget-tunnel.plist
   ```
 
-### 가계부 데이터 백업
-가계부 DB(`data/budget.db`)는 Git에 올라가지 않으므로, 큰 작업 전에는 안전하게 백업해 두는 것을 권장합니다.
+### 가계부 데이터 백업 (자동 + 수동 + 앱 다운로드)
+가계부 DB(`data/budget.db`)는 Git에 올라가지 않으며, 아래 3가지 방법으로 안전하게 보호됩니다.
+1. **매일 새벽 03:30 자동 백업 (`launchd`)**: `com.kimjiho.home-budget-backup`이 `scripts/backup-db.mjs`를 실행해 `data/backups/budget_YYYY-MM-DD.db`에 저장합니다(최대 30개 보관).
+2. **웹 앱에서 즉시 다운로드**: 로그인 후 **설정 → 데이터 관리 / 정기내역 → DB 파일 즉시 백업(.db)** 버튼으로 스마트폰이나 PC에 바로 내려받을 수 있습니다.
+3. **터미널 수동 백업**:
 ```bash
 cd /Users/kimjiho/Gemini_Project/Home_Budget
-sqlite3 data/budget.db ".backup './budget_backup_$(date +%Y%m%d).db'"
+node scripts/backup-db.mjs
 ```
 
 ---
 
 ## 7. 추후 진행 예정 / 확인 체크리스트
 
-- [ ] 앱 로그인 후 **설정 → 비밀번호**에서 본인이 기억하기 쉬운 비밀번호로 변경
+- [x] 로그인 인증·문서 및 전체 기능 확장 코드 GitHub(`origin/main`) 반영 완료
 - [ ] (선택) 본인 도메인 준비 시 `.env.local` 설정 후 고정 Cloudflare 터널로 전환
+- [ ] (선택) Quick Tunnel 주소 자동 알림이 필요하면 `.env.local`에 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 설정
 - [ ] (선택) 도메인 없이 고정 주소가 필요할 경우 Tailscale 설치 검토
 - [ ] (선택) 무인 재부팅 복구가 필요하면 macOS 자동 로그인 및 재부팅 후 자동 실행 테스트 진행
-- [ ] (선택) 현재 추가된 로그인 인증 코드 및 문서를 본인 GitHub 저장소(`origin/main`)에 커밋/푸시할지 결정

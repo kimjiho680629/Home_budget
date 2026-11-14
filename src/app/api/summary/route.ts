@@ -1,17 +1,21 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { requireAuth } from '@/lib/auth';
+import { getLocalMonthStr, getRecentMonthKeys, isValidMonthStr } from '@/lib/date';
 
-// 월별 요약 및 통계 조회 (선택적 구성원 필터 지원)
+// 월별 요약, 최근 6개월 추이 및 통계 조회 (선택적 구성원 필터 지원)
 export async function GET(request: Request) {
   const unauth = requireAuth(request);
   if (unauth) return unauth;
+
   try {
     const db = getDb();
     const { searchParams } = new URL(request.url);
-    const now = new Date();
-    const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const month = searchParams.get('month') || currentMonthStr;
+    const requestedMonth = searchParams.get('month') || getLocalMonthStr();
+    if (!isValidMonthStr(requestedMonth)) {
+      return NextResponse.json({ success: false, error: '올바른 월 형식(YYYY-MM)이 아닙니다.' }, { status: 400 });
+    }
+    const month = requestedMonth;
     const user = searchParams.get('user');
 
     const hasUserFilter = Boolean(user && user !== 'all');
@@ -76,6 +80,37 @@ export async function GET(request: Request) {
       .get(month) as { amount: number } | undefined;
     const budgetAmount = budgetRow ? budgetRow.amount : 0;
 
+    // 최근 6개월 수입/지출 추이
+    const trendMonths = getRecentMonthKeys(month, 6);
+    const firstTrendMonth = trendMonths[0];
+    const trendParams: string[] = hasUserFilter
+      ? [firstTrendMonth, month, user as string]
+      : [firstTrendMonth, month];
+
+    const trendRows = db
+      .prepare(`
+        SELECT strftime('%Y-%m', date) as ym,
+               COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as totalIncome,
+               COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as totalExpense
+        FROM transactions
+        WHERE strftime('%Y-%m', date) >= ? AND strftime('%Y-%m', date) <= ?${userClause}
+        GROUP BY ym
+      `)
+      .all(...trendParams) as { ym: string; totalIncome: number; totalExpense: number }[];
+
+    const trendMap = new Map(trendRows.map((r) => [r.ym, r]));
+    const monthlyTrend = trendMonths.map((ym) => {
+      const hit = trendMap.get(ym);
+      const inc = hit ? hit.totalIncome : 0;
+      const exp = hit ? hit.totalExpense : 0;
+      return {
+        month: ym,
+        totalIncome: inc,
+        totalExpense: exp,
+        balance: inc - exp,
+      };
+    });
+
     return NextResponse.json({
       success: true,
       data: {
@@ -87,6 +122,7 @@ export async function GET(request: Request) {
         categoryExpenses,
         categoryIncomes,
         userExpenses,
+        monthlyTrend,
       },
     });
   } catch (error: unknown) {

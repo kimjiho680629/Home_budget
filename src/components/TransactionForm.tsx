@@ -1,41 +1,52 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Plus, X, Check, UserPlus } from 'lucide-react';
-import type { Category, Transaction, TransactionType, User } from '@/types/budget';
+import { Plus, X, Check, UserPlus, Repeat } from 'lucide-react';
+import type { Category, RecurringTemplate, Transaction, TransactionType, User } from '@/types/budget';
 import { CATEGORY_ICON_OPTIONS, COLOR_PALETTE, PAYMENT_METHODS } from '@/lib/constants';
+import { getLocalDateStr } from '@/lib/date';
+import { apiFetch } from '@/lib/api-client';
+import { formatAUD } from '@/lib/currency';
 import { CategoryIcon } from './CategoryIcon';
 
 interface TransactionFormProps {
   users: User[];
   categories: Category[];
+  templates?: RecurringTemplate[];
   editingTx?: Transaction | null;
+  duplicatingTx?: Transaction | null;
   onSaved: () => void;
   onCancel?: () => void;
   onGoToSettings: () => void;
   onCategoryAdded: () => Promise<void>;
 }
 
-// 내역 등록 및 수정 공용 폼 (인라인 카테고리 빠른 추가 포함)
+// 내역 등록 및 수정 공용 폼 (인라인 카테고리 추가 + 정기 템플릿 불러오기/저장)
 export function TransactionForm({
   users,
   categories,
+  templates = [],
   editingTx,
+  duplicatingTx,
   onSaved,
   onCancel,
   onGoToSettings,
   onCategoryAdded,
 }: TransactionFormProps) {
-  const getTodayStr = () => new Date().toISOString().split('T')[0];
+  const initialSource = editingTx || duplicatingTx || null;
 
-  const [type, setType] = useState<TransactionType>(editingTx?.type || 'expense');
-  const [amount, setAmount] = useState(editingTx ? String(editingTx.amount) : '');
-  const [category, setCategory] = useState(editingTx?.category || '');
-  const [userName, setUserName] = useState(editingTx?.user_name || '');
-  const [date, setDate] = useState(editingTx?.date || getTodayStr());
-  const [memo, setMemo] = useState(editingTx?.memo || '');
-  const [paymentMethod, setPaymentMethod] = useState(editingTx?.payment_method || '카드');
+  const [type, setType] = useState<TransactionType>(initialSource?.type || 'expense');
+  const [amount, setAmount] = useState(initialSource ? String(initialSource.amount) : '');
+  const [category, setCategory] = useState(initialSource?.category || '');
+  const [userName, setUserName] = useState(initialSource?.user_name || '');
+  const [date, setDate] = useState(editingTx?.date || getLocalDateStr());
+  const [memo, setMemo] = useState(initialSource?.memo || '');
+  const [paymentMethod, setPaymentMethod] = useState(initialSource?.payment_method || '카드');
   const [submitting, setSubmitting] = useState(false);
+
+  // 정기 템플릿으로도 저장 옵션 (신규 입력 시)
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [templateTitle, setTemplateTitle] = useState('');
 
   // 인라인 새 카테고리 빠른 추가 상태
   const [showQuickCat, setShowQuickCat] = useState(false);
@@ -49,7 +60,7 @@ export function TransactionForm({
     [categories, type]
   );
 
-  // 수정 대상이 바뀌거나 초기 목록 로드 시 기본값 동기화
+  // 수정/복사 대상이 바뀌거나 초기 목록 로드 시 기본값 동기화
   useEffect(() => {
     if (editingTx) {
       setType(editingTx.type);
@@ -59,6 +70,16 @@ export function TransactionForm({
       setDate(editingTx.date);
       setMemo(editingTx.memo || '');
       setPaymentMethod(editingTx.payment_method || '카드');
+      setSaveAsTemplate(false);
+    } else if (duplicatingTx) {
+      setType(duplicatingTx.type);
+      setAmount(String(duplicatingTx.amount));
+      setCategory(duplicatingTx.category);
+      setUserName(duplicatingTx.user_name);
+      setDate(getLocalDateStr());
+      setMemo(duplicatingTx.memo || '');
+      setPaymentMethod(duplicatingTx.payment_method || '카드');
+      setSaveAsTemplate(false);
     } else {
       if (!userName && users.length > 0) {
         setUserName(users[0].name);
@@ -67,12 +88,21 @@ export function TransactionForm({
         setCategory(filteredCategories[0].name);
       }
     }
-  }, [editingTx, users, filteredCategories]);
+  }, [editingTx, duplicatingTx, users, filteredCategories, userName, category]);
 
   const handleTypeChange = (nextType: TransactionType) => {
     setType(nextType);
     const nextCats = categories.filter((c) => c.type === nextType);
     setCategory(nextCats[0]?.name || '');
+  };
+
+  const applyTemplateToForm = (tpl: RecurringTemplate) => {
+    setType(tpl.type);
+    setAmount(String(tpl.amount));
+    setCategory(tpl.category);
+    setUserName(tpl.user_name);
+    setPaymentMethod(tpl.payment_method || '카드');
+    setMemo(tpl.memo || tpl.title);
   };
 
   const addQuickAmount = (delta: number) => {
@@ -89,7 +119,7 @@ export function TransactionForm({
     }
     try {
       setAddingCat(true);
-      const res = await fetch('/api/categories', {
+      const res = await apiFetch('/api/categories', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -99,6 +129,7 @@ export function TransactionForm({
           icon: quickCatIcon,
         }),
       });
+      if (res.status === 401) return;
       const data = await res.json();
       if (!data.success) {
         alert(data.error || '카테고리 추가에 실패했습니다.');
@@ -134,7 +165,7 @@ export function TransactionForm({
     try {
       setSubmitting(true);
       const isEdit = Boolean(editingTx);
-      const res = await fetch('/api/transactions', {
+      const res = await apiFetch('/api/transactions', {
         method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -148,12 +179,33 @@ export function TransactionForm({
           payment_method: paymentMethod,
         }),
       });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
+        if (!isEdit && saveAsTemplate) {
+          const dayNum = Number(date.split('-')[2]) || 1;
+          await apiFetch('/api/templates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: templateTitle.trim() || memo.trim() || category,
+              type,
+              amount: numericAmount,
+              category,
+              user_name: userName,
+              payment_method: paymentMethod,
+              memo: memo.trim(),
+              day_of_month: dayNum,
+            }),
+          });
+        }
+
         if (!isEdit) {
           setAmount('');
           setMemo('');
-          setDate(getTodayStr());
+          setDate(getLocalDateStr());
+          setSaveAsTemplate(false);
+          setTemplateTitle('');
         }
         onSaved();
       } else {
@@ -168,6 +220,34 @@ export function TransactionForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {/* 정기 템플릿 빠른 불러오기 (신규 입력 시에만 표시) */}
+      {!editingTx && templates.length > 0 && (
+        <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+          <div className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+            <Repeat size={13} className="text-indigo-500" />
+            자주 쓰는 정기 내역 불러오기
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {templates.map((tpl) => (
+              <button
+                key={tpl.id}
+                type="button"
+                onClick={() => applyTemplateToForm(tpl)}
+                className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-400 text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    tpl.type === 'expense' ? 'bg-rose-500' : 'bg-emerald-500'
+                  }`}
+                />
+                <span>{tpl.title}</span>
+                <span className="text-slate-400 font-semibold">{formatAUD(tpl.amount)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 지출 / 수입 전환 */}
       <div className="grid grid-cols-2 gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl">
         <button
@@ -445,6 +525,30 @@ export function TransactionForm({
           className="w-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl py-2.5 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
+
+      {/* 정기 템플릿으로도 저장 (신규 입력 시) */}
+      {!editingTx && (
+        <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={saveAsTemplate}
+              onChange={(e) => setSaveAsTemplate(e.target.checked)}
+              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span>이 내역을 &quot;고정·정기 템플릿&quot;으로도 저장해 두기</span>
+          </label>
+          {saveAsTemplate && (
+            <input
+              type="text"
+              placeholder="템플릿 이름 (예: 주간 정기청소 A거래처, 월세)"
+              value={templateTitle}
+              onChange={(e) => setTemplateTitle(e.target.value)}
+              className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          )}
+        </div>
+      )}
 
       {/* 버튼 영역 */}
       <div className="flex gap-2 pt-1">

@@ -13,7 +13,9 @@ import {
   QrCode,
   LogOut,
 } from 'lucide-react';
-import type { Category, SummaryData, TabType, Transaction, User } from '@/types/budget';
+import type { Category, RecurringTemplate, SummaryData, TabType, Transaction, User } from '@/types/budget';
+import { getLocalMonthStr } from '@/lib/date';
+import { apiFetch, UNAUTHORIZED_EVENT } from '@/lib/api-client';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ConnectModal } from '@/components/ConnectModal';
 import { LoginScreen } from '@/components/LoginScreen';
@@ -34,6 +36,7 @@ export default function BudgetApp() {
   const [previousTab, setPreviousTab] = useState<TabType>('dashboard');
   const [selectedUser, setSelectedUser] = useState<string>('all');
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [duplicatingTx, setDuplicatingTx] = useState<Transaction | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
 
   const [summary, setSummary] = useState<SummaryData>({
@@ -45,13 +48,24 @@ export default function BudgetApp() {
     categoryExpenses: [],
     categoryIncomes: [],
     userExpenses: [],
+    monthlyTrend: [],
   });
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [templates, setTemplates] = useState<RecurringTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const monthStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+  const monthStr = getLocalMonthStr(currentDate);
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setConnectOpen(false);
+      setAuthenticated(false);
+    };
+    window.addEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, handleUnauthorized);
+  }, []);
 
   const checkAuth = useCallback(async () => {
     try {
@@ -82,10 +96,11 @@ export default function BudgetApp() {
       setLoading(true);
       const userQuery = encodeURIComponent(selectedUser);
       const responses = await Promise.all([
-        fetch(`/api/summary?month=${monthStr}&user=${userQuery}`),
-        fetch(`/api/transactions?month=${monthStr}&user=${userQuery}`),
-        fetch('/api/users'),
-        fetch('/api/categories'),
+        apiFetch(`/api/summary?month=${monthStr}&user=${userQuery}`),
+        apiFetch(`/api/transactions?month=${monthStr}&user=${userQuery}`),
+        apiFetch('/api/users'),
+        apiFetch('/api/categories'),
+        apiFetch('/api/templates'),
       ]);
 
       if (responses.some((r) => r.status === 401)) {
@@ -93,7 +108,9 @@ export default function BudgetApp() {
         return;
       }
 
-      const [sumRes, txRes, userRes, catRes] = await Promise.all(responses.map((r) => r.json()));
+      const [sumRes, txRes, userRes, catRes, tplRes] = await Promise.all(
+        responses.map((r) => r.json())
+      );
 
       if (sumRes.success) setSummary(sumRes.data);
       if (txRes.success) setTransactions(txRes.data);
@@ -108,6 +125,7 @@ export default function BudgetApp() {
         }
       }
       if (catRes.success) setCategories(catRes.data);
+      if (tplRes.success) setTemplates(tplRes.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -141,14 +159,16 @@ export default function BudgetApp() {
     });
   };
 
-  const openAddTab = (tx: Transaction | null = null) => {
+  const openAddTab = (tx: Transaction | null = null, duplicateSource: Transaction | null = null) => {
     setPreviousTab(tab === 'add' ? 'dashboard' : tab);
     setEditingTx(tx);
+    setDuplicatingTx(duplicateSource);
     setTab('add');
   };
 
   const handleSaved = () => {
     setEditingTx(null);
+    setDuplicatingTx(null);
     setTab(previousTab === 'add' ? 'dashboard' : previousTab);
     fetchData();
   };
@@ -156,7 +176,8 @@ export default function BudgetApp() {
   const handleDeleteTx = async (id: number) => {
     if (!confirm('이 내역을 삭제하시겠습니까?')) return;
     try {
-      const res = await fetch(`/api/transactions?id=${id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/transactions?id=${id}`, { method: 'DELETE' });
+      if (res.status === 401) return;
       const data = await res.json();
       if (data.success) {
         fetchData();
@@ -392,10 +413,13 @@ export default function BudgetApp() {
                     transactions={transactions}
                     users={users}
                     categories={categories}
+                    templates={templates}
                     selectedUser={selectedUser}
+                    currentMonthStr={monthStr}
                     onOpenAdd={() => openAddTab(null)}
                     onViewAll={() => setTab('list')}
                     onEditTx={(tx) => openAddTab(tx)}
+                    onRefresh={fetchData}
                   />
                 )}
 
@@ -404,7 +428,9 @@ export default function BudgetApp() {
                     transactions={transactions}
                     users={users}
                     categories={categories}
+                    selectedUser={selectedUser}
                     onEdit={(tx) => openAddTab(tx)}
+                    onDuplicate={(tx) => openAddTab(null, tx)}
                     onDelete={handleDeleteTx}
                     onOpenAdd={() => openAddTab(null)}
                   />
@@ -414,23 +440,27 @@ export default function BudgetApp() {
                   <div className="max-w-2xl mx-auto bg-white dark:bg-slate-900 p-5 lg:p-7 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
                     <div className="flex items-center justify-between mb-5">
                       <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">
-                        {editingTx ? '거래 내역 수정' : '새 내역 등록'}
+                        {editingTx ? '거래 내역 수정' : duplicatingTx ? '내역 복사 등록' : '새 내역 등록'}
                       </h2>
                       <span className="text-xs text-slate-400">
-                        카테고리도 바로 추가할 수 있어요
+                        카테고리·정기 템플릿도 바로 관리할 수 있어요
                       </span>
                     </div>
                     <TransactionForm
                       users={users}
                       categories={categories}
+                      templates={templates}
                       editingTx={editingTx}
+                      duplicatingTx={duplicatingTx}
                       onSaved={handleSaved}
                       onCancel={() => {
                         setEditingTx(null);
+                        setDuplicatingTx(null);
                         setTab(previousTab === 'add' ? 'dashboard' : previousTab);
                       }}
                       onGoToSettings={() => {
                         setEditingTx(null);
+                        setDuplicatingTx(null);
                         setTab('settings');
                       }}
                       onCategoryAdded={fetchData}
@@ -439,13 +469,21 @@ export default function BudgetApp() {
                 )}
 
                 {tab === 'stats' && (
-                  <StatsView summary={summary} users={users} categories={categories} />
+                  <StatsView
+                    summary={summary}
+                    users={users}
+                    categories={categories}
+                    selectedUser={selectedUser}
+                    currentMonthStr={monthStr}
+                  />
                 )}
 
                 {tab === 'settings' && (
                   <SettingsView
                     users={users}
                     categories={categories}
+                    templates={templates}
+                    currentMonthStr={monthStr}
                     envManagedAuth={envManagedAuth}
                     onRefresh={fetchData}
                     onLogout={handleLogout}

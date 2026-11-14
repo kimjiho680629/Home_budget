@@ -4,6 +4,12 @@ set -euo pipefail
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$BASE_DIR"
 
+# 5MB 초과 로그는 시작 시 1세대 백업으로 순환
+LOG_FILE="$BASE_DIR/logs/launchd-server.log"
+if [ -f "$LOG_FILE" ] && [ "$(wc -c < "$LOG_FILE")" -gt 5242880 ]; then
+  mv -f "$LOG_FILE" "${LOG_FILE}.1"
+fi
+
 if [ -f "$BASE_DIR/.env.local" ]; then
   set -a
   # shellcheck disable=SC1091

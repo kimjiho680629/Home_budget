@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Wallet,
   TrendingDown,
@@ -10,9 +10,14 @@ import {
   PlusCircle,
   PieChart,
   Pencil,
+  Target,
+  Check,
+  X,
+  Repeat,
 } from 'lucide-react';
-import type { Category, SummaryData, Transaction, User } from '@/types/budget';
+import type { Category, RecurringTemplate, SummaryData, Transaction, User } from '@/types/budget';
 import { formatAUD, formatSignedAUD } from '@/lib/currency';
+import { apiFetch } from '@/lib/api-client';
 import { CategoryIcon } from './CategoryIcon';
 
 interface DashboardViewProps {
@@ -20,28 +25,109 @@ interface DashboardViewProps {
   transactions: Transaction[];
   users: User[];
   categories: Category[];
+  templates: RecurringTemplate[];
   selectedUser: string;
+  currentMonthStr: string;
   onOpenAdd: () => void;
   onViewAll: () => void;
   onEditTx: (tx: Transaction) => void;
+  onRefresh: () => Promise<void>;
 }
 
-// 대시보드 뷰 (모바일 1열 / PC 멀티컬럼 카드 그리드)
+// 대시보드 뷰 (모바일 1열 / PC 멀티컬럼 카드 그리드 + 목표 예산 게이지)
 export function DashboardView({
   summary,
   transactions,
   users,
   categories,
+  templates,
   selectedUser,
+  currentMonthStr,
   onOpenAdd,
   onViewAll,
   onEditTx,
+  onRefresh,
 }: DashboardViewProps) {
+  const [editingBudget, setEditingBudget] = useState(false);
+  const [budgetInput, setBudgetInput] = useState(
+    summary.budgetAmount > 0 ? String(summary.budgetAmount) : ''
+  );
+  const [savingBudget, setSavingBudget] = useState(false);
+  const [applyingTemplates, setApplyingTemplates] = useState(false);
+
+  useEffect(() => {
+    setBudgetInput(summary.budgetAmount > 0 ? String(summary.budgetAmount) : '');
+    setEditingBudget(false);
+  }, [summary.month, summary.budgetAmount]);
+
   const getUserColor = (name: string) => users.find((u) => u.name === name)?.color || '#3b82f6';
   const getCategoryMeta = (name: string, type: string) =>
     categories.find((c) => c.name === name && c.type === type);
 
   const totalFamilyExpense = summary.userExpenses.reduce((acc, cur) => acc + cur.total, 0);
+
+  const budgetAmount = summary.budgetAmount || 0;
+  const budgetRatio =
+    budgetAmount > 0 ? Math.round((summary.totalExpense / budgetAmount) * 100) : 0;
+  const budgetBarWidth = Math.min(budgetRatio, 100);
+  const budgetRemaining = budgetAmount - summary.totalExpense;
+  const isOverBudget = budgetAmount > 0 && summary.totalExpense > budgetAmount;
+
+  const handleSaveBudget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const numeric = budgetInput.trim() === '' ? 0 : Number(budgetInput);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      alert('목표 예산 금액을 0 이상으로 입력하세요.');
+      return;
+    }
+    try {
+      setSavingBudget(true);
+      const res = await apiFetch('/api/budgets', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: currentMonthStr, amount: numeric }),
+      });
+      if (res.status === 401) return;
+      const data = await res.json();
+      if (data.success) {
+        setEditingBudget(false);
+        await onRefresh();
+      } else {
+        alert(data.error || '예산 저장에 실패했습니다.');
+      }
+    } catch {
+      alert('예산 저장 중 오류가 발생했습니다.');
+    } finally {
+      setSavingBudget(false);
+    }
+  };
+
+  const handleApplyAllTemplates = async () => {
+    if (templates.length === 0) return;
+    if (!confirm(`저장된 ${templates.length}건의 고정·정기 내역을 ${currentMonthStr} 가계부에 등록할까요?`)) {
+      return;
+    }
+    try {
+      setApplyingTemplates(true);
+      const res = await apiFetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'apply', applyAll: true, month: currentMonthStr }),
+      });
+      if (res.status === 401) return;
+      const data = await res.json();
+      if (data.success) {
+        await onRefresh();
+        alert(data.message || '정기 내역이 등록되었습니다.');
+      } else {
+        alert(data.error || '등록에 실패했습니다.');
+      }
+    } catch {
+      alert('정기 내역 등록 중 오류가 발생했습니다.');
+    } finally {
+      setApplyingTemplates(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -118,6 +204,123 @@ export function DashboardView({
             {formatAUD(summary.totalIncome)}
           </div>
         </div>
+      </div>
+
+      {/* 월별 목표 예산 진행률 카드 */}
+      <div className="bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Target size={16} className={isOverBudget ? 'text-rose-500' : 'text-blue-500'} />
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">
+              {currentMonthStr} 월간 목표 예산
+            </h3>
+            {budgetAmount > 0 && (
+              <span
+                className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                  isOverBudget
+                    ? 'bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400'
+                    : budgetRatio >= 80
+                      ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300'
+                      : 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
+                }`}
+              >
+                {budgetRatio}% 사용
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {templates.length > 0 && (
+              <button
+                type="button"
+                disabled={applyingTemplates}
+                onClick={handleApplyAllTemplates}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 text-xs font-bold transition disabled:opacity-50 cursor-pointer"
+              >
+                <Repeat size={13} />
+                <span>{applyingTemplates ? '등록 중...' : `정기 내역 일괄 등록 (${templates.length})`}</span>
+              </button>
+            )}
+
+            {!editingBudget && (
+              <button
+                type="button"
+                onClick={() => setEditingBudget(true)}
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition cursor-pointer"
+              >
+                <Pencil size={12} />
+                <span>{budgetAmount > 0 ? '예산 수정' : '예산 설정'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {editingBudget ? (
+          <form onSubmit={handleSaveBudget} className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[160px] max-w-xs">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                A$
+              </span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="예: 3500"
+                value={budgetInput}
+                onChange={(e) => setBudgetInput(e.target.value)}
+                autoFocus
+                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-9 pr-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={savingBudget}
+              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+            >
+              <Check size={14} /> 저장
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEditingBudget(false);
+                setBudgetInput(budgetAmount > 0 ? String(budgetAmount) : '');
+              }}
+              className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold inline-flex items-center gap-1 cursor-pointer"
+            >
+              <X size={14} /> 취소
+            </button>
+          </form>
+        ) : budgetAmount > 0 ? (
+          <div className="mt-3 space-y-2">
+            <div className="w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  isOverBudget
+                    ? 'bg-rose-500'
+                    : budgetRatio >= 80
+                      ? 'bg-amber-500'
+                      : 'bg-blue-600'
+                }`}
+                style={{ width: `${budgetBarWidth}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap justify-between items-center text-xs text-slate-500 dark:text-slate-400 gap-2">
+              <span>
+                지출 <strong className="text-slate-800 dark:text-slate-200">{formatAUD(summary.totalExpense)}</strong> / 목표{' '}
+                <strong className="text-slate-800 dark:text-slate-200">{formatAUD(budgetAmount)}</strong>
+              </span>
+              <span className={isOverBudget ? 'text-rose-600 dark:text-rose-400 font-bold' : 'font-semibold'}>
+                {isOverBudget
+                  ? `${formatAUD(Math.abs(budgetRemaining))} 초과`
+                  : `남은 예산 ${formatAUD(budgetRemaining)}`}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+            이번 달 목표 예산을 설정하면 지출 진행률과 초과 여부를 바로 확인할 수 있습니다.
+          </p>
+        )}
       </div>
 
       {/* 모바일 빠른 입력 버튼 */}

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { apiFetch } from '@/lib/api-client';
 import {
   X,
   QrCode,
@@ -38,7 +39,8 @@ export function ConnectModal({ open, onClose }: ConnectModalProps) {
   const loadInfo = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/connection');
+      const res = await apiFetch('/api/connection');
+      if (res.status === 401) return;
       const json = await res.json();
       if (json.success) {
         setInfo(json.data);
